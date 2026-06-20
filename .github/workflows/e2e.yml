@@ -3,12 +3,6 @@ name: Badgr CI E2E
 
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - ".github/workflows/e2e.yml"
-      - "dist/**"
-      - "action.yml"
 
 permissions:
   contents: read
@@ -40,7 +34,7 @@ jobs:
       - name: Verify diagnosis posted
         if: failure() && steps.badgr.outcome == 'success'
         run: |
-          if [ -f "$GITHUB_STEP_SUMMARY" ] && grep -q "### Badgr Agent CI" "$GITHUB_STEP_SUMMARY"; then
+          if [ -f "$GITHUB_STEP_SUMMARY" ] && grep -q "badgr-agent-diagnosis" "$GITHUB_STEP_SUMMARY"; then
             echo "E2E PASS — Badgr Agent CI wrote job summary"
             cat "$GITHUB_STEP_SUMMARY"
             exit 0
