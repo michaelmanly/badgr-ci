@@ -94,7 +94,7 @@ On reruns, the **same comment is updated** — not duplicated.
 
 ## Support
 
-- Docs: [github.com/michaelmanly/gpu-ai/tree/main/packages/badgr-agent](https://github.com/michaelmanly/gpu-ai/tree/main/packages/badgr-agent)
+- Repo: [github.com/michaelmanly/badgr-ci](https://github.com/michaelmanly/badgr-ci)
 - Email: [hello@aibadgr.com](mailto:hello@aibadgr.com)
 
 ## License
