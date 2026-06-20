@@ -1,0 +1,15 @@
+name: Badgr Agent CI
+description: Diagnose failed GitHub Actions runs and post likely cause, evidence, and suggested fix on the PR.
+branding:
+  icon: activity
+  color: blue
+runs:
+  using: node20
+  main: dist/index.js
+inputs:
+  badgr_api_key:
+    required: true
+    description: AI Badgr API key (get at https://aibadgr.com).
+  github_token:
+    required: true
+    description: GitHub token with contents:read, actions:read, pull-requests:write.
