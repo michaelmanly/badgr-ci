@@ -30,7 +30,9 @@ steps:
 
 ### 1. Get an API key
 
-Sign up at [aibadgr.com](https://aibadgr.com) and create `BADGR_API_KEY` in **Settings → Secrets and variables → Actions**.
+Sign up at [aibadgr.com](https://aibadgr.com), copy your API key from the dashboard, and add it as `BADGR_API_KEY` in **Settings → Secrets and variables → Actions**.
+
+You can **bring your own key** (OpenAI, Anthropic, etc.) instead of using AI Badgr credits — configure BYOK in the [AI Badgr dashboard](https://aibadgr.com), not in your workflow.
 
 ### 2. Permissions
 
