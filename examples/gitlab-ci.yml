@@ -1,0 +1,23 @@
+stages:
+  - test
+  - diagnose
+
+test:
+  stage: test
+  image: node:20
+  script:
+    - npm ci
+    - npm test
+
+badgr-ci:
+  stage: diagnose
+  image: node:20
+  when: on_failure
+  script:
+    - node dist/gitlab.js
+  variables:
+    BADGR_API_KEY: $BADGR_API_KEY
+    GITLAB_TOKEN: $GITLAB_TOKEN
+  # Download the latest bundled runner from the public repo:
+  #   curl -fsSL https://github.com/michaelmanly/badgr-ci/releases/latest/download/gitlab.js -o dist/gitlab.js
+  # Or install from npm: npm install -g badgr-agent && badgr-ci-gitlab

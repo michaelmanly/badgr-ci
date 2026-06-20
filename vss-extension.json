@@ -1,0 +1,38 @@
+{
+  "manifestVersion": 1,
+  "id": "badgr-ci",
+  "name": "Badgr Agent CI",
+  "version": "1.0.2",
+  "publisher": "aibadgr",
+  "public": true,
+  "description": "Badgr Agent CI — diagnoses CI failures and posts likely cause, evidence, and suggested fix.",
+  "categories": ["Azure Pipelines"],
+  "tags": ["ci", "diagnosis", "pipeline", "devops", "badgr", "ai"],
+  "targets": [{ "id": "Microsoft.VisualStudio.Services" }],
+  "icons": { "default": "images/badgr-logo.png" },
+  "content": {
+    "details": { "path": "README.md" }
+  },
+  "links": {
+    "getstarted": { "uri": "https://aibadgr.com" },
+    "learn": { "uri": "https://github.com/michaelmanly/badgr-ci" },
+    "support": { "uri": "mailto:hello@aibadgr.com" }
+  },
+  "repository": {
+    "type": "git",
+    "uri": "https://github.com/michaelmanly/badgr-ci"
+  },
+  "files": [
+    { "path": "BadgrCI", "addressable": true },
+    { "path": "dist/azure.js", "addressable": true },
+    { "path": "images/badgr-logo.png", "addressable": true }
+  ],
+  "contributions": [
+    {
+      "id": "BadgrCI",
+      "type": "ms.vss-distributed-task.task",
+      "targets": ["ms.vss-distributed-task.tasks"],
+      "properties": { "name": "BadgrCI" }
+    }
+  ]
+}

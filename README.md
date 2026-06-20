@@ -1,14 +1,17 @@
 # Badgr Agent CI
 
-**Badgr Agent CI** diagnoses why your GitHub Actions workflows fail and posts the likely cause, evidence, and suggested fix on your pull request (or workflow summary).
+**Badgr Agent CI** diagnoses why your CI pipeline fails and posts the likely cause, evidence, and suggested fix — on the PR, MR, build thread, or pipeline console.
 
 Part of the **[Badgr Agent](https://aibadgr.com)** product family from [AI Badgr](https://aibadgr.com).
 
 [![GitHub Marketplace](https://img.shields.io/badge/Marketplace-Badgr_Agent_CI-blue?logo=github)](https://github.com/marketplace/actions/badgr-agent-ci)
+[![Azure Marketplace](https://img.shields.io/badge/Azure_DevOps-aibadgr.badgr--ci-blue?logo=azure-devops)](https://marketplace.visualstudio.com/items?itemName=aibadgr.badgr-ci)
 
-## Install
+---
 
-Add one step at the end of your workflow (runs only on failure):
+## Quick start
+
+### GitHub Actions
 
 ```yaml
 permissions:
@@ -28,25 +31,70 @@ steps:
       github_token: ${{ secrets.GITHUB_TOKEN }}
 ```
 
-### 1. Get an API key
+### Azure DevOps
 
-Sign up at [aibadgr.com](https://aibadgr.com), copy your API key from the dashboard, and add it as `BADGR_API_KEY` in **Settings → Secrets and variables → Actions**.
+Install from the [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=aibadgr.badgr-ci) and add to your pipeline:
 
-You can **bring your own key** (OpenAI, Anthropic, etc.) instead of using AI Badgr credits — configure BYOK in the [AI Badgr dashboard](https://aibadgr.com), not in your workflow.
+```yaml
+- task: BadgrCI@1
+  condition: failed()
+  env:
+    BADGR_API_KEY: $(BADGR_API_KEY)
+    SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+```
 
-### 2. Permissions
+### GitLab CI
 
-The workflow job needs:
+```yaml
+badgr-ci:
+  stage: diagnose
+  image: node:20
+  when: on_failure
+  script:
+    - node dist/gitlab.js
+  variables:
+    BADGR_API_KEY: $BADGR_API_KEY
+    GITLAB_TOKEN: $GITLAB_TOKEN
+```
 
-| Permission | Why |
-|------------|-----|
-| `contents: read` | Read repository context |
-| `actions: read` | Fetch failed job logs |
-| `pull-requests: write` | Post or update the diagnosis comment |
+Download the bundled runner: `dist/gitlab.js` from [Releases](https://github.com/michaelmanly/badgr-ci/releases/latest).
+
+### Jenkins
+
+```groovy
+post {
+  failure {
+    sh 'node badgr-jenkins.js'
+  }
+}
+```
+
+Download the bundled runner: `dist/jenkins.js` from [Releases](https://github.com/michaelmanly/badgr-ci/releases/latest).  
+Set credentials: `BADGR_API_KEY` (Jenkins credential binding).
+
+### Kubernetes
+
+```bash
+BADGR_API_KEY=<key> node dist/k8s.js --namespace=my-ns
+```
+
+Download the bundled runner: `dist/k8s.js` from [Releases](https://github.com/michaelmanly/badgr-ci/releases/latest).  
+Requires `kubectl` configured and pointing at the target cluster.
+
+---
+
+## Get an API key
+
+Sign up at [aibadgr.com](https://aibadgr.com) and create `BADGR_API_KEY` in your CI secrets.
+
+## What it does
+
+- Fetches real logs from the failed job/task/pipeline/pod
+- Diagnoses common failures (tests, installs, TypeScript, Docker, permissions, env vars, timeouts, OOM, CrashLoopBackOff)
+- Posts one deduped comment/thread (or pipeline console output when no PR/MR)
+- Shows quoted evidence and a confidence score
 
 ## Example comment
-
-When CI fails, Badgr Agent CI posts:
 
 ```markdown
 ### Badgr Agent CI
@@ -62,41 +110,45 @@ When CI fails, Badgr Agent CI posts:
 **Confidence:** high
 ```
 
-On reruns, the **same comment is updated** — not duplicated.
+## Adapters
 
-## What it does
+| Runtime | Install | Entry |
+|---------|---------|-------|
+| **GitHub Actions** | `uses: michaelmanly/badgr-ci@v1` | `dist/index.js` |
+| **Azure DevOps** | `task: BadgrCI@1` (Marketplace) | `dist/azure.js` |
+| **GitLab CI** | Download `dist/gitlab.js` | `dist/gitlab.js` |
+| **Jenkins** | Download `dist/jenkins.js` | `dist/jenkins.js` |
+| **Kubernetes** | Download `dist/k8s.js` | `dist/k8s.js` |
 
-- Fetches real logs from the failed GitHub Actions job
-- Diagnoses common failures (tests, installs, TypeScript, Docker, permissions, env vars, timeouts)
-- Posts one deduped PR comment (or workflow summary when no PR)
-- Shows quoted evidence and a confidence score
+## Repository layout
 
-## What it does not do
+```
+badgr-ci/
+├── action.yml          GitHub Action definition
+├── dist/
+│   ├── index.js        GitHub Action bundled runner
+│   ├── azure.js        Azure DevOps bundled runner
+│   ├── gitlab.js       GitLab CI bundled runner
+│   ├── jenkins.js      Jenkins bundled runner
+│   └── k8s.js          Kubernetes bundled runner
+├── BadgrCI/
+│   └── task.json       Azure DevOps task manifest
+├── examples/           Copy-paste workflow snippets
+└── README.md
+```
 
-- Does not auto-fix or modify your code
-- Does not rerun workflows or open/merge PRs
-- Does not require changes to your existing tests
-
-## Inputs
-
-| Input | Required | Description |
-|-------|----------|-------------|
-| `badgr_api_key` | Yes | Your AI Badgr API key |
-| `github_token` | Yes | `${{ secrets.GITHUB_TOKEN }}` (needs PR + actions permissions) |
+Source lives in the private monorepo at `packages/badgr-agent`. This public repo contains only compiled JS and docs.
 
 ## Related products
 
-| Runtime | Install |
+| Product | Install |
 |---------|---------|
-| **Badgr Agent CI** (GitHub) | `uses: michaelmanly/badgr-ci@v1` |
-| **Badgr Agent CI** (Azure) | [aibadgr.badgr-ci](https://marketplace.visualstudio.com/items?itemName=aibadgr.badgr-ci) — `BadgrCI@1` |
 | **Badgr Agent CLI** | `npm install -g badgr-agent` |
-| **Badgr Agent Infra** | `docker run badgr/agent:infra` |
 | **Badgr Auto** (VS Code) | [aibadgr.badgr-auto](https://marketplace.visualstudio.com/items?itemName=aibadgr.badgr-auto) |
 
 ## Support
 
-- Repo: [github.com/michaelmanly/badgr-ci](https://github.com/michaelmanly/badgr-ci)
+- Docs: [aibadgr.com/docs](https://aibadgr.com/docs)
 - Email: [hello@aibadgr.com](mailto:hello@aibadgr.com)
 
 ## License

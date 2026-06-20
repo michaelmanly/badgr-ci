@@ -1,0 +1,26 @@
+pipeline {
+  agent any
+
+  environment {
+    BADGR_API_KEY = credentials('badgr-api-key')
+  }
+
+  stages {
+    stage('Test') {
+      steps {
+        sh 'npm ci'
+        sh 'npm test'
+      }
+    }
+  }
+
+  post {
+    failure {
+      script {
+        // Download and run the bundled Jenkins adapter
+        // curl -fsSL https://github.com/michaelmanly/badgr-ci/releases/latest/download/jenkins.js -o badgr-jenkins.js
+        sh 'node badgr-jenkins.js'
+      }
+    }
+  }
+}
