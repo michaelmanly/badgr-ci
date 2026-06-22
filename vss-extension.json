@@ -2,7 +2,7 @@
   "manifestVersion": 1,
   "id": "badgr-ci",
   "name": "Badgr Agent CI",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "publisher": "aibadgr",
   "public": true,
   "description": "Badgr Agent CI — diagnoses CI failures and posts likely cause, evidence, and suggested fix.",

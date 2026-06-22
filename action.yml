@@ -10,6 +10,10 @@ inputs:
   badgr_api_key:
     required: true
     description: AI Badgr API key (get at https://aibadgr.com).
+  badgr_api_url:
+    required: false
+    description: "Custom Badgr API endpoint (e.g., http://badgr-agent-ci.internal:8000/v1 for self-hosted). Defaults to https://aibadgr.com/v1."
+    default: "https://aibadgr.com/v1"
   github_token:
     required: true
     description: GitHub token with contents:read, actions:read, pull-requests:write.

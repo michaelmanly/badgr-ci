@@ -33,11 +33,54 @@ async function callBadgrApi(endpoint, body, options) {
 }
 
 // packages/badgr-agent/dist/core/redaction.js
-function redactSecrets(text) {
-  return text.replace(/BADGR_API_KEY=[\w-]+/g, "BADGR_API_KEY=***").replace(/password[:=\s]+[\w-]+/gi, "password=***").replace(/token[:=\s]+[\w-]+/gi, "token=***").replace(/secret[:=\s]+[\w-]+/gi, "secret=***").replace(/key[:=\s]+[\w-]+/gi, "key=***");
+var RULES = [
+  // Explicit BADGR key first
+  [/BADGR_API_KEY[:=\s"'`]+\S+/g, "BADGR_API_KEY=***"],
+  // Common named secret vars in env/config/log output
+  [/\b(password|passwd|pwd|secret|token|apikey|api_key|credential|auth_token|access_token|refresh_token|private_key)[:=\s"'`]+\S+/gi, "$1=***"],
+  // Bearer / Basic auth headers
+  [/Bearer [A-Za-z0-9._\-+/]{10,}/g, "Bearer ***"],
+  [/Basic [A-Za-z0-9+/=]{10,}/g, "Basic ***"],
+  // JWTs — three dot-separated base64url segments starting with eyJ
+  [/eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*/g, "[JWT ***]"],
+  // AWS IAM access key ID
+  [/AKIA[A-Z0-9]{16}/g, "[AWS_KEY ***]"],
+  // GitHub token formats (PATs, server, runner, OAuth)
+  [/\b(github_pat_|ghp_|ghs_|ghr_|gho_)[A-Za-z0-9_]{30,}/g, "[GH_TOKEN ***]"],
+  // GitLab PATs
+  [/\bglpat-[A-Za-z0-9_\-]{20,}/g, "[GL_TOKEN ***]"],
+  // Azure storage account key
+  [/AccountKey=[A-Za-z0-9+/=]{20,}/g, "AccountKey=***"],
+  // Azure SAS tokens
+  [/SharedAccessSignature [^\n"']{10,}/g, "SharedAccessSignature ***"],
+  // Database / service connection strings with embedded credentials
+  [/(mongodb(\+srv)?|postgres(ql)?|mysql|redis|amqps?):\/\/[^@\s]{3,}@/gi, "$1://***@"]
+];
+function redactSecretsWithCount(text) {
+  let result = text;
+  let count = 0;
+  for (const [pattern, replacement] of RULES) {
+    const matches = result.match(pattern);
+    count += matches?.length ?? 0;
+    result = result.replace(pattern, replacement);
+  }
+  return { redacted: result, count };
 }
 
 // packages/badgr-agent/dist/ci/call-badgr-api.js
+var DEFAULT_API_URL = "https://aibadgr.com/v1";
+async function withRetry(fn, retries = 2, delayMs = 2e3) {
+  try {
+    return await fn();
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    const isTransient = /HTTP (429|502|503|504)/.test(msg) || /network|econnrefused|etimedout/i.test(msg);
+    if (retries <= 0 || !isTransient)
+      throw err;
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+    return withRetry(fn, retries - 1, delayMs * 2);
+  }
+}
 function validateDiagnosis(data) {
   if (typeof data !== "object" || data === null) {
     throw new Error("Invalid diagnosis response: expected object");
@@ -56,6 +99,8 @@ function validateDiagnosis(data) {
     throw new Error("Invalid confidence level");
   if (typeof obj.needs_human !== "boolean")
     throw new Error("Missing required field: needs_human");
+  const owner = obj.owner;
+  const validOwners = ["app", "devops", "cloud", "security"];
   return {
     title: obj.title,
     likely_cause: obj.likely_cause,
@@ -66,12 +111,16 @@ function validateDiagnosis(data) {
     failed_job: obj.failed_job,
     failed_step: obj.failed_step,
     repeat_count: obj.repeat_count,
-    comment_markdown: obj.comment_markdown
+    comment_markdown: obj.comment_markdown,
+    owner: validOwners.includes(owner ?? "") ? owner : void 0
   };
 }
 async function callBadgrCiDiagnose(context, options) {
-  const redactedSnippet = redactSecrets(context.logSnippet);
-  const data = await callBadgrApi("/ci/diagnose", {
+  const { redacted: redactedSnippet, count: redactionCount } = redactSecretsWithCount(context.logSnippet);
+  if (redactionCount > 0) {
+    console.log(`Badgr redacted ${redactionCount} possible secret${redactionCount === 1 ? "" : "s"} before analysis.`);
+  }
+  const payload = {
     provider: context.provider,
     repo: context.repo,
     run_id: context.runId,
@@ -83,8 +132,22 @@ async function callBadgrCiDiagnose(context, options) {
     failed_step: context.failedStep,
     log_snippet: redactedSnippet,
     changed_files: context.changedFiles ?? []
-  }, options);
-  return validateDiagnosis(data);
+  };
+  if (process.env.BADGR_DRY_RUN === "1") {
+    console.log("[Badgr dry-run] Would POST to /ci/diagnose with payload:");
+    console.log(JSON.stringify(payload, null, 2));
+    return {
+      title: "[dry-run] Diagnosis skipped",
+      likely_cause: "BADGR_DRY_RUN=1 \u2014 no API call made",
+      evidence: [],
+      suggested_fix: "Remove BADGR_DRY_RUN to enable live diagnosis",
+      confidence: "low",
+      needs_human: false,
+      redactionCount
+    };
+  }
+  const data = await withRetry(() => callBadgrApi("/ci/diagnose", payload, options));
+  return { ...validateDiagnosis(data), redactionCount };
 }
 
 // packages/badgr-agent/dist/ci/extract-logs.js
@@ -112,18 +175,161 @@ function collectContext(input) {
   return { ...input, logSnippet: extractRelevantLogSnippet(input.log) };
 }
 
+// packages/badgr-agent/dist/ci/output-mode.js
+function getOutputMode() {
+  const raw = (process.env.BADGR_OUTPUT_MODE ?? "summary").toLowerCase().trim();
+  if (raw === "summary" || raw === "pr-comment" || raw === "console" || raw === "both")
+    return raw;
+  console.warn(`[Badgr] Unknown BADGR_OUTPUT_MODE value "${process.env.BADGR_OUTPUT_MODE}" \u2014 defaulting to "summary". Valid values: summary, pr-comment, console, both`);
+  return "summary";
+}
+function shouldPostConsole(mode) {
+  return mode === "console" || mode === "both";
+}
+
+// packages/badgr-agent/dist/ci/mode.js
+function getBadgrMode() {
+  const raw = (process.env.BADGR_MODE ?? "failure").toLowerCase().trim();
+  if (raw === "failure" || raw === "health" || raw === "audit" || raw === "security")
+    return raw;
+  console.warn(`[Badgr] Unknown BADGR_MODE value "${process.env.BADGR_MODE}" \u2014 defaulting to "failure". Valid values: failure, health, audit, security`);
+  return "failure";
+}
+
+// packages/badgr-agent/dist/ci/call-badgr-mode.js
+async function withRetry2(fn, retries = 2, delayMs = 2e3) {
+  try {
+    return await fn();
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    const isTransient = /HTTP (429|502|503|504)/.test(msg) || /network|econnrefused|etimedout/i.test(msg);
+    if (retries <= 0 || !isTransient)
+      throw err;
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+    return withRetry2(fn, retries - 1, delayMs * 2);
+  }
+}
+var YAML_MAX_BYTES = 32 * 1024;
+async function callBadgrCiHealth(context, options) {
+  const { redacted: redactedSnippet, count: redactionCount } = redactSecretsWithCount(context.logSnippet);
+  if (redactionCount > 0) {
+    console.log(`Badgr redacted ${redactionCount} possible secret${redactionCount === 1 ? "" : "s"} before analysis.`);
+  }
+  const payload = {
+    provider: context.provider,
+    repo: context.repo,
+    run_id: context.runId,
+    run_url: context.runUrl,
+    commit_sha: context.commitSha,
+    branch: context.branch,
+    log_snippet: redactedSnippet
+  };
+  if (process.env.BADGR_DRY_RUN === "1") {
+    console.log("[Badgr dry-run] Would POST to /ci/health with payload:");
+    console.log(JSON.stringify(payload, null, 2));
+    return { summary: "[dry-run] Health check skipped", slowest_steps: [], cache_misses: [], retry_count: 0, flaky_tests: [], suggestions: [], redactionCount };
+  }
+  const data = await withRetry2(() => callBadgrApi("/ci/health", payload, options));
+  return { ...validateHealthReport(data), redactionCount };
+}
+async function callBadgrCiAudit(context, workflowYaml, options) {
+  const { redacted: redactedSnippet } = redactSecretsWithCount(context.logSnippet);
+  const cappedYaml = workflowYaml && workflowYaml.length > YAML_MAX_BYTES ? workflowYaml.slice(0, YAML_MAX_BYTES) + "\n# [Badgr: YAML truncated at 32KB]" : workflowYaml;
+  const payload = {
+    provider: context.provider,
+    repo: context.repo,
+    run_id: context.runId,
+    run_url: context.runUrl,
+    branch: context.branch,
+    log_snippet: redactedSnippet,
+    workflow_yaml: cappedYaml
+  };
+  if (process.env.BADGR_DRY_RUN === "1") {
+    console.log("[Badgr dry-run] Would POST to /ci/audit with payload:");
+    console.log(JSON.stringify(payload, null, 2));
+    return { summary: "[dry-run] Audit skipped", findings: [], total_findings: 0, high_count: 0, medium_count: 0, low_count: 0 };
+  }
+  const data = await withRetry2(() => callBadgrApi("/ci/audit", payload, options));
+  return validateAuditReport(data);
+}
+async function callBadgrCiSecurity(context, options) {
+  const { redacted: redactedSnippet, count: redactionCount } = redactSecretsWithCount(context.logSnippet);
+  if (redactionCount > 0) {
+    console.log(`Badgr redacted ${redactionCount} possible secret${redactionCount === 1 ? "" : "s"} before security scan.`);
+  }
+  const payload = {
+    provider: context.provider,
+    repo: context.repo,
+    run_id: context.runId,
+    run_url: context.runUrl,
+    branch: context.branch,
+    log_snippet: redactedSnippet,
+    redaction_count: redactionCount
+  };
+  if (process.env.BADGR_DRY_RUN === "1") {
+    console.log("[Badgr dry-run] Would POST to /ci/security with payload:");
+    console.log(JSON.stringify(payload, null, 2));
+    return { summary: "[dry-run] Security scan skipped", findings: [], redaction_count: redactionCount, total_findings: 0 };
+  }
+  const data = await withRetry2(() => callBadgrApi("/ci/security", payload, options));
+  return validateSecurityReport(data);
+}
+function validateHealthReport(data) {
+  const obj = data;
+  return {
+    summary: String(obj.summary ?? ""),
+    pipeline_duration_seconds: typeof obj.pipeline_duration_seconds === "number" ? obj.pipeline_duration_seconds : void 0,
+    slowest_steps: Array.isArray(obj.slowest_steps) ? obj.slowest_steps : [],
+    duration_regression: typeof obj.duration_regression === "string" ? obj.duration_regression : void 0,
+    cache_misses: Array.isArray(obj.cache_misses) ? obj.cache_misses : [],
+    retry_count: typeof obj.retry_count === "number" ? obj.retry_count : 0,
+    flaky_tests: Array.isArray(obj.flaky_tests) ? obj.flaky_tests : [],
+    queue_time_seconds: typeof obj.queue_time_seconds === "number" ? obj.queue_time_seconds : void 0,
+    wasted_time_seconds: typeof obj.wasted_time_seconds === "number" ? obj.wasted_time_seconds : void 0,
+    suggestions: Array.isArray(obj.suggestions) ? obj.suggestions : []
+  };
+}
+function validateAuditReport(data) {
+  const obj = data;
+  const findings = Array.isArray(obj.findings) ? obj.findings : [];
+  return {
+    summary: String(obj.summary ?? ""),
+    findings,
+    total_findings: findings.length,
+    high_count: findings.filter((f) => f.severity === "high").length,
+    medium_count: findings.filter((f) => f.severity === "medium").length,
+    low_count: findings.filter((f) => f.severity === "low").length
+  };
+}
+function validateSecurityReport(data) {
+  const obj = data;
+  const findings = Array.isArray(obj.findings) ? obj.findings : [];
+  return {
+    summary: String(obj.summary ?? ""),
+    findings,
+    redaction_count: typeof obj.redaction_count === "number" ? obj.redaction_count : 0,
+    total_findings: findings.length
+  };
+}
+
 // packages/badgr-agent/dist/ci/types.js
 var BADGR_MARKER = "<!-- badgr-agent-diagnosis -->";
 
 // packages/badgr-agent/dist/ci/render-comment.js
 function renderCiComment(diagnosis) {
   if ("comment_markdown" in diagnosis && diagnosis.comment_markdown) {
+    const redactionNote2 = diagnosis.redactionCount ? `
+> _Badgr redacted ${diagnosis.redactionCount} possible secret${diagnosis.redactionCount === 1 ? "" : "s"} before analysis._
+` : "";
     return `${BADGR_MARKER}
-${diagnosis.comment_markdown}`;
+${redactionNote2}${diagnosis.comment_markdown}`;
   }
   const normalized = normalizeDiagnosis(diagnosis);
+  const redactionNote = diagnosis.redactionCount ? `
+> _Badgr redacted ${diagnosis.redactionCount} possible secret${diagnosis.redactionCount === 1 ? "" : "s"} before analysis._
+` : "";
   const markdown = `### Badgr Agent CI
-
+${redactionNote}
 **Likely cause:** ${normalized.likelyCause}
 
 **Evidence:**
@@ -132,7 +338,8 @@ ${normalized.evidence.map((e) => `- ${e}`).join("\n")}
 **Suggested fix:** ${normalized.suggestedFix}
 
 **Confidence:** ${normalized.confidence}${normalized.repeatCount ? `
-**Repeat occurrences:** ${normalized.repeatCount}` : ""}`;
+**Repeat occurrences:** ${normalized.repeatCount}` : ""}${normalized.owner ? `
+**Owner:** ${normalized.owner}` : ""}`;
   return `${BADGR_MARKER}
 ${markdown}`;
 }
@@ -155,8 +362,120 @@ function normalizeDiagnosis(diagnosis) {
     needsHuman: diagnosis.needsHuman ?? diagnosis.needs_human ?? false,
     failedJob: diagnosis.failedJob ?? diagnosis.failed_job,
     failedStep: diagnosis.failedStep ?? diagnosis.failed_step,
-    repeatCount: diagnosis.repeatCount ?? diagnosis.repeat_count
+    repeatCount: diagnosis.repeatCount ?? diagnosis.repeat_count,
+    owner: diagnosis.owner
   };
+}
+
+// packages/badgr-agent/dist/ci/render-report.js
+var SEVERITY_ICON = {
+  critical: "\u{1F534}",
+  high: "\u{1F7E0}",
+  medium: "\u{1F7E1}",
+  low: "\u26AA"
+};
+function renderHealthReport(report) {
+  const lines = [`${BADGR_MARKER}`, `### Badgr Agent CI \u2014 Pipeline Health`];
+  if (report.redactionCount) {
+    lines.push(`
+> _Badgr redacted ${report.redactionCount} possible secret${report.redactionCount === 1 ? "" : "s"} before analysis._
+`);
+  }
+  lines.push(`
+${report.summary}`);
+  if (report.pipeline_duration_seconds !== void 0) {
+    lines.push(`
+**Total duration:** ${formatDuration(report.pipeline_duration_seconds)}`);
+  }
+  if (report.duration_regression) {
+    lines.push(`**Duration regression:** ${report.duration_regression}`);
+  }
+  if (report.queue_time_seconds !== void 0) {
+    lines.push(`**Queue time:** ${formatDuration(report.queue_time_seconds)}`);
+  }
+  if (report.wasted_time_seconds !== void 0) {
+    lines.push(`**Wasted time:** ${formatDuration(report.wasted_time_seconds)}`);
+  }
+  if (report.slowest_steps.length > 0) {
+    lines.push(`
+**Slowest steps:**`);
+    for (const step of report.slowest_steps.slice(0, 5)) {
+      lines.push(`- ${step.name}: ${formatDuration(step.duration_seconds)}`);
+    }
+  }
+  if (report.cache_misses.length > 0) {
+    lines.push(`
+**Cache misses:** ${report.cache_misses.join(", ")}`);
+  }
+  if (report.retry_count > 0) {
+    lines.push(`**Retries:** ${report.retry_count}`);
+  }
+  if (report.flaky_tests.length > 0) {
+    lines.push(`
+**Flaky tests detected:**`);
+    for (const test of report.flaky_tests.slice(0, 5)) {
+      lines.push(`- ${test}`);
+    }
+  }
+  if (report.suggestions.length > 0) {
+    lines.push(`
+**Suggestions:**`);
+    for (const s of report.suggestions) {
+      lines.push(`- ${s}`);
+    }
+  }
+  return lines.join("\n");
+}
+function renderAuditReport(report) {
+  const lines = [
+    `${BADGR_MARKER}`,
+    `### Badgr Agent CI \u2014 Pipeline Audit`,
+    ``,
+    report.summary,
+    ``,
+    `**Findings:** ${report.total_findings} (${report.high_count} high, ${report.medium_count} medium, ${report.low_count} low)`
+  ];
+  if (report.findings.length > 0) {
+    lines.push(``);
+    for (const finding of report.findings) {
+      const icon = SEVERITY_ICON[finding.severity] ?? "\u26AA";
+      const fileNote = finding.file ? ` in \`${finding.file}\`` : "";
+      lines.push(`**${icon} [${finding.severity.toUpperCase()}]** ${finding.description}${fileNote}`);
+      lines.push(`  \u2192 ${finding.suggestion}`);
+      lines.push(``);
+    }
+  }
+  return lines.join("\n");
+}
+function renderSecurityReport(report) {
+  const lines = [
+    `${BADGR_MARKER}`,
+    `### Badgr Agent CI \u2014 Security Scan`
+  ];
+  if (report.redaction_count > 0) {
+    lines.push(`
+> _Badgr redacted ${report.redaction_count} possible secret${report.redaction_count === 1 ? "" : "s"} before scanning._
+`);
+  }
+  lines.push(``, report.summary, ``);
+  lines.push(`**Findings:** ${report.total_findings}`);
+  if (report.findings.length > 0) {
+    lines.push(``);
+    for (const finding of report.findings) {
+      const icon = SEVERITY_ICON[finding.severity] ?? "\u26AA";
+      lines.push(`**${icon} [${finding.severity.toUpperCase()}]** ${finding.description}`);
+      lines.push(`  \u2192 ${finding.recommendation}`);
+      lines.push(``);
+    }
+  }
+  return lines.join("\n");
+}
+function formatDuration(seconds) {
+  if (seconds < 60)
+    return `${Math.round(seconds)}s`;
+  const m = Math.floor(seconds / 60);
+  const s = Math.round(seconds % 60);
+  return s > 0 ? `${m}m ${s}s` : `${m}m`;
 }
 
 // packages/badgr-agent/dist/ci/k8s/main.js
@@ -238,10 +557,51 @@ ${logs}`);
 }
 async function run(opts = {}) {
   const apiKey = process.env.BADGR_API_KEY;
+  const outputMode = getOutputMode();
+  const badgrMode = getBadgrMode();
   if (!apiKey)
     throw new Error("BADGR_API_KEY is required. Set it as an environment variable: export BADGR_API_KEY=<your-key>");
   const namespace = opts.namespace || process.env.BADGR_K8S_NAMESPACE;
   const selector = opts.selector || process.env.BADGR_K8S_SELECTOR;
+  const apiOptions = { apiUrl: process.env.BADGR_API_URL || DEFAULT_API_URL, apiKey };
+  if (badgrMode === "health") {
+    const logs2 = await collectK8sLogs({ namespace, selector });
+    const context2 = collectContext({
+      provider: "kubernetes",
+      repo: process.env.BADGR_K8S_CLUSTER,
+      runId: logs2.failedStep,
+      failedJob: logs2.failedJob,
+      failedStep: logs2.failedStep,
+      log: logs2.logSnippet || "No cluster data available."
+    });
+    const report = await callBadgrCiHealth(context2, apiOptions);
+    console.log(renderHealthReport(report));
+    return;
+  }
+  if (badgrMode === "audit") {
+    const context2 = collectContext({
+      provider: "kubernetes",
+      repo: process.env.BADGR_K8S_CLUSTER,
+      log: "No pipeline YAML available for Kubernetes."
+    });
+    const report = await callBadgrCiAudit(context2, void 0, apiOptions);
+    console.log(renderAuditReport(report));
+    return;
+  }
+  if (badgrMode === "security") {
+    const logs2 = await collectK8sLogs({ namespace, selector });
+    const context2 = collectContext({
+      provider: "kubernetes",
+      repo: process.env.BADGR_K8S_CLUSTER,
+      runId: logs2.failedStep,
+      failedJob: logs2.failedJob,
+      failedStep: logs2.failedStep,
+      log: logs2.logSnippet || "No cluster data available."
+    });
+    const report = await callBadgrCiSecurity(context2, apiOptions);
+    console.log(renderSecurityReport(report));
+    return;
+  }
   const logs = await collectK8sLogs({ namespace, selector });
   if (logs.setupError || !logs.logSnippet) {
     console.log(renderSetupErrorComment(logs.setupError || "No failed Kubernetes workloads found."));
@@ -255,8 +615,10 @@ async function run(opts = {}) {
     failedStep: logs.failedStep,
     log: logs.logSnippet
   });
-  const diagnosis = await callBadgrCiDiagnose(context, { apiUrl: process.env.BADGR_API_URL || "https://aibadgr.com/v1", apiKey });
-  console.log(renderCiComment(diagnosis));
+  const diagnosis = await callBadgrCiDiagnose(context, apiOptions);
+  if (shouldPostConsole(outputMode) || outputMode === "pr-comment" || outputMode === "summary") {
+    console.log(renderCiComment(diagnosis));
+  }
 }
 if (process.env.BADGR_CI_NO_AUTO_RUN !== "1") {
   const argv = process.argv.slice(2);
