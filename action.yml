@@ -1,5 +1,5 @@
-name: Badgr Agent CI
-description: Diagnose failed GitHub Actions runs and post likely cause, evidence, and suggested fix on the PR.
+name: Badgr Pipeline Check
+description: "CI Failure Diagnosis for GitHub Actions — always-on pipeline check that diagnoses failures, checks health, and scans for security issues. AI escalation optional."
 branding:
   icon: activity
   color: blue
@@ -8,8 +8,8 @@ runs:
   main: dist/index.js
 inputs:
   badgr_api_key:
-    required: true
-    description: AI Badgr API key (get at https://aibadgr.com).
+    required: false
+    description: "AI Badgr API key (get at https://aibadgr.com). Optional — rule-based Pipeline Check runs without it. Add to unlock AI-powered diagnosis for unknown failures."
   badgr_api_url:
     required: false
     description: "Custom Badgr API endpoint (e.g., http://badgr-agent-ci.internal:8000/v1 for self-hosted). Defaults to https://aibadgr.com/v1."

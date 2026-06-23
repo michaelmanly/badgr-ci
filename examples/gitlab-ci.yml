@@ -1,6 +1,5 @@
 stages:
   - test
-  - diagnose
 
 test:
   stage: test
@@ -9,15 +8,16 @@ test:
     - npm ci
     - npm test
 
-badgr-ci:
-  stage: diagnose
+# Badgr GitLab CI Failure Check — diagnoses failures, health, security, and config.
+# Download dist/gitlab.js from: https://github.com/michaelmanly/badgr-ci/releases/latest
+badgr-pipeline-check:
+  stage: .post
   image: node:20
-  when: on_failure
+  when: always
+  before_script:
+    - curl -fsSL https://github.com/michaelmanly/badgr-ci/releases/latest/download/gitlab.js -o /tmp/badgr-gitlab.js
   script:
-    - node dist/gitlab.js
+    - node /tmp/badgr-gitlab.js
   variables:
-    BADGR_API_KEY: $BADGR_API_KEY
-    GITLAB_TOKEN: $GITLAB_TOKEN
-  # Download the latest bundled runner from the public repo:
-  #   curl -fsSL https://github.com/michaelmanly/badgr-ci/releases/latest/download/gitlab.js -o dist/gitlab.js
-  # Or install from npm: npm install -g badgr-agent && badgr-ci-gitlab
+    BADGR_API_KEY: $BADGR_API_KEY     # remove to use rule-based checks only
+    GITLAB_TOKEN: $GITLAB_TOKEN       # optional: richer MR comments

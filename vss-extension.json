@@ -1,13 +1,13 @@
 {
   "manifestVersion": 1,
   "id": "badgr-ci",
-  "name": "Badgr Agent CI",
-  "version": "1.0.3",
+  "name": "Badgr Pipeline Check",
+  "version": "1.0.6",
   "publisher": "aibadgr",
   "public": true,
-  "description": "Badgr Agent CI — diagnoses CI failures and posts likely cause, evidence, and suggested fix.",
+  "description": "Badgr Pipeline Check — CI Failure Diagnosis for Azure DevOps. Always-on pipeline check that diagnoses failures, reports health, and scans for security issues. No API key required.",
   "categories": ["Azure Pipelines"],
-  "tags": ["ci", "diagnosis", "pipeline", "devops", "badgr", "ai"],
+  "tags": ["ci", "diagnosis", "pipeline", "devops", "badgr", "ai", "failure", "build-failure", "pipeline-failure", "azure-pipelines"],
   "targets": [{ "id": "Microsoft.VisualStudio.Services" }],
   "icons": { "default": "images/badgr-logo.png" },
   "content": {
@@ -24,7 +24,7 @@
   },
   "files": [
     { "path": "BadgrCI", "addressable": true },
-    { "path": "dist/azure.js", "addressable": true },
+    { "path": "dist/ci/azure/main.js", "addressable": true },
     { "path": "images/badgr-logo.png", "addressable": true }
   ],
   "contributions": [

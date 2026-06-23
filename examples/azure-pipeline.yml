@@ -15,9 +15,31 @@ steps:
   - script: npm test
     displayName: Run tests
 
+  # Badgr Azure Pipelines Failure Check — always run last, condition: always()
+  # Diagnoses failures, health, security, and audit using local rules.
+  # No BADGR_API_KEY or SYSTEM_ACCESSTOKEN required for rule-based analysis.
   - task: BadgrCI@1
-    condition: failed()
-    displayName: Badgr Agent CI
+    condition: always()
+    displayName: Badgr Pipeline Check
     env:
       BADGR_API_KEY: $(BADGR_API_KEY)
-      SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+      BADGR_OUTPUT_MODE: summary
+      # SYSTEM_ACCESSTOKEN: $(System.AccessToken)  # optional: richer logs + PR thread comments
+
+  # Enhanced — pass SYSTEM_ACCESSTOKEN for real Azure DevOps task logs.
+  # - task: BadgrCI@1
+  #   condition: always()
+  #   displayName: Badgr Pipeline Check (enhanced)
+  #   env:
+  #     BADGR_API_KEY: $(BADGR_API_KEY)
+  #     SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+  #     BADGR_OUTPUT_MODE: summary
+
+  # Self-hosted — no logs sent to aibadgr.com.
+  # - task: BadgrCI@1
+  #   condition: always()
+  #   displayName: Badgr Pipeline Check (self-hosted)
+  #   env:
+  #     BADGR_API_URL: http://your-host:8000/v1
+  #     BADGR_API_KEY: $(BADGR_INTERNAL_KEY)
+  #     BADGR_OUTPUT_MODE: summary

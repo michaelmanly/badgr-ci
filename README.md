@@ -1,124 +1,133 @@
-# Badgr Agent CI
+# Badgr Pipeline Check for GitHub Actions
 
-**Badgr Agent CI** diagnoses why your CI pipeline fails and posts the likely cause, evidence, and suggested fix — on the PR, MR, build thread, or pipeline console.
+CI Failure Diagnosis for GitHub Actions — always-on pipeline check that diagnoses failures, checks pipeline health, and scans for security issues.
 
-Part of the **[Badgr Agent](https://aibadgr.com)** product family from [AI Badgr](https://aibadgr.com).
-
-[![GitHub Marketplace](https://img.shields.io/badge/Marketplace-Badgr_Agent_CI-blue?logo=github)](https://github.com/marketplace/actions/badgr-agent-ci)
-[![Azure Marketplace](https://img.shields.io/badge/Azure_DevOps-aibadgr.badgr--ci-blue?logo=azure-devops)](https://marketplace.visualstudio.com/items?itemName=aibadgr.badgr-ci)
+[![GitHub Marketplace](https://img.shields.io/badge/Marketplace-Badgr_Pipeline_Check-blue?logo=github)](https://github.com/marketplace/actions/badgr-pipeline-check)
+[![Azure Marketplace](https://img.shields.io/badge/Azure_DevOps-Badgr_Pipeline_Check-blue?logo=azure-devops)](https://marketplace.visualstudio.com/items?itemName=aibadgr.badgr-ci)
 
 ---
 
+## What Badgr checks
+
+- **Failure diagnosis:** likely cause, evidence, suggested fix, confidence
+- **Pipeline health:** slow steps, retries, bottlenecks
+- **Security:** secrets, risky commands, broad permissions
+- **Config audit:** missing timeouts, missing cache, unsafe defaults
+
 ## Quick start
 
-### GitHub Actions
+```yaml
+- name: Badgr Pipeline Check
+  uses: michaelmanly/badgr-ci@v1
+  if: always()
+  with:
+    github_token: ${{ secrets.GITHUB_TOKEN }}
+```
+
+Rule-based checks run without any API key. Add `BADGR_API_KEY` to enable AI for ambiguous failures:
+
+```yaml
+- name: Badgr Pipeline Check
+  uses: michaelmanly/badgr-ci@v1
+  if: always()
+  with:
+    github_token: ${{ secrets.GITHUB_TOKEN }}
+    badgr_api_key: ${{ secrets.BADGR_API_KEY }}
+```
+
+## How it works
+
+1. Badgr runs on every build
+2. Logs and metadata are collected
+3. Secrets are redacted before analysis
+4. Local rule-based checks run first
+5. AI is used only for ambiguous failures, if an API key is configured
+6. Results are written to summary, console, or PR comment
+
+## When AI is used
+
+All four checks always run as rule-based analysis, with no API calls:
+
+| Check | How it works |
+|---|---|
+| **Failure** | Pattern-matched against 14+ known error types |
+| **Health** | Step timing thresholds and retry detection |
+| **Security** | Pattern matching for risky commands and broad permissions |
+| **Audit** | YAML checks for unpinned images, missing timeouts, hardcoded values |
+
+AI is called only when:
+
+- the build failed
+- `BADGR_API_KEY` is configured
+- the rule-based failure score is low-confidence or the failure pattern is unknown
+
+Health, security, and audit checks are always rule-based — they never call AI. If the AI call fails or is unavailable, the rule-based report is still written.
+
+## Permissions
+
+`GITHUB_TOKEN` is used for workflow context and optional PR comments.
 
 ```yaml
 permissions:
   contents: read
   actions: read
   pull-requests: write
-
-steps:
-  - uses: actions/checkout@v4
-  - run: npm test
-
-  - name: Badgr Agent CI
-    uses: michaelmanly/badgr-ci@v1
-    if: failure()
-    with:
-      badgr_api_key: ${{ secrets.BADGR_API_KEY }}
-      github_token: ${{ secrets.GITHUB_TOKEN }}
 ```
 
-### Azure DevOps
+## Hosted and self-hosted
 
-Install from the [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=aibadgr.badgr-ci) and add to your pipeline:
+**Hosted mode:**
+Logs are redacted locally. Badgr is only called when optional AI escalation is configured and needed.
+
+**Self-hosted mode:**
+Run the Badgr Pipeline Check container inside your network. Logs are sent only to your own container and optionally your own model endpoint.
 
 ```yaml
-- task: BadgrCI@1
-  condition: failed()
-  env:
-    BADGR_API_KEY: $(BADGR_API_KEY)
-    SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+- name: Badgr Pipeline Check
+  uses: michaelmanly/badgr-ci@v1
+  if: always()
+  with:
+    github_token: ${{ secrets.GITHUB_TOKEN }}
+    badgr_api_url: http://badgr-agent-ci.internal:8000/v1
+    badgr_api_key: ${{ secrets.BADGR_INTERNAL_KEY }}
 ```
 
-### GitLab CI
+## Output modes
 
-```yaml
-badgr-ci:
-  stage: diagnose
-  image: node:20
-  when: on_failure
-  script:
-    - node dist/gitlab.js
-  variables:
-    BADGR_API_KEY: $BADGR_API_KEY
-    GITLAB_TOKEN: $GITLAB_TOKEN
+| Mode | Output |
+|---|---|
+| `summary` | Workflow step summary |
+| `console` | Job log |
+| `pr-comment` | PR comment |
+| `both` | Summary plus PR comment |
+
+Set via environment variable: `BADGR_OUTPUT_MODE: pr-comment`
+
+## Example output
+
 ```
+### Badgr Pipeline Check
 
-Download the bundled runner: `dist/gitlab.js` from [Releases](https://github.com/michaelmanly/badgr-ci/releases/latest).
-
-### Jenkins
-
-```groovy
-post {
-  failure {
-    sh 'node badgr-jenkins.js'
-  }
-}
-```
-
-Download the bundled runner: `dist/jenkins.js` from [Releases](https://github.com/michaelmanly/badgr-ci/releases/latest).  
-Set credentials: `BADGR_API_KEY` (Jenkins credential binding).
-
-### Kubernetes
-
-```bash
-BADGR_API_KEY=<key> node dist/k8s.js --namespace=my-ns
-```
-
-Download the bundled runner: `dist/k8s.js` from [Releases](https://github.com/michaelmanly/badgr-ci/releases/latest).  
-Requires `kubectl` configured and pointing at the target cluster.
-
----
-
-## Get an API key
-
-Sign up at [aibadgr.com](https://aibadgr.com) and create `BADGR_API_KEY` in your CI secrets.
-
-## What it does
-
-- Fetches real logs from the failed job/task/pipeline/pod
-- Diagnoses common failures (tests, installs, TypeScript, Docker, permissions, env vars, timeouts, OOM, CrashLoopBackOff)
-- Posts one deduped comment/thread (or pipeline console output when no PR/MR)
-- Shows quoted evidence and a confidence score
-
-## Example comment
-
-```markdown
-### Badgr Agent CI
-
-**Likely cause:** Missing dependency `vite`
-
-**Evidence:**
-- Cannot find module 'vite'
-- Failed during `npm test`
-
-**Suggested fix:** Add to devDependencies: `npm install --save-dev vite`
-
+**Failure:** Missing dependency `vite`
+**Evidence:** `Cannot find module 'vite'`
+**Suggested fix:** `npm install --save-dev vite`
 **Confidence:** high
+
+**Health:** Test step took 8m 42s
+**Security:** No secrets found
+**Audit:** Consider adding a timeout
 ```
 
-## Adapters
+## Other platforms
 
-| Runtime | Install | Entry |
-|---------|---------|-------|
-| **GitHub Actions** | `uses: michaelmanly/badgr-ci@v1` | `dist/index.js` |
-| **Azure DevOps** | `task: BadgrCI@1` (Marketplace) | `dist/azure.js` |
-| **GitLab CI** | Download `dist/gitlab.js` | `dist/gitlab.js` |
-| **Jenkins** | Download `dist/jenkins.js` | `dist/jenkins.js` |
-| **Kubernetes** | Download `dist/k8s.js` | `dist/k8s.js` |
+| Platform | Install |
+|---|---|
+| **Azure DevOps** | `task: BadgrCI@1` — [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=aibadgr.badgr-ci) |
+| **GitLab CI** | Download `dist/gitlab.js` from [Releases](https://github.com/michaelmanly/badgr-ci/releases/latest), then `node dist/gitlab.js` |
+| **Jenkins** | Download `dist/jenkins.js` from [Releases](https://github.com/michaelmanly/badgr-ci/releases/latest), then `node dist/jenkins.js` |
+| **Kubernetes** | Download `dist/k8s.js` from [Releases](https://github.com/michaelmanly/badgr-ci/releases/latest), then `node dist/k8s.js` |
+| **npm** | `npm install -g badgr-agent` |
+| **Docker (self-hosted)** | `docker pull michaelmanleyx/badgr-agent:infra` |
 
 ## Repository layout
 
@@ -126,7 +135,7 @@ Sign up at [aibadgr.com](https://aibadgr.com) and create `BADGR_API_KEY` in your
 badgr-ci/
 ├── action.yml          GitHub Action definition
 ├── dist/
-│   ├── index.js        GitHub Action bundled runner
+│   ├── index.js        GitHub Actions bundled runner
 │   ├── azure.js        Azure DevOps bundled runner
 │   ├── gitlab.js       GitLab CI bundled runner
 │   ├── jenkins.js      Jenkins bundled runner
@@ -139,16 +148,23 @@ badgr-ci/
 
 Source lives in the private monorepo at `packages/badgr-agent`. This public repo contains only compiled JS and docs.
 
-## Related products
+## FAQ
 
-| Product | Install |
-|---------|---------|
-| **Badgr Agent CLI** | `npm install -g badgr-agent` |
-| **Badgr Auto** (VS Code) | [aibadgr.badgr-auto](https://marketplace.visualstudio.com/items?itemName=aibadgr.badgr-auto) |
+### Does Badgr require AI?
+No. Local rule-based checks run by default.
+
+### Does Badgr send logs to AI Badgr?
+Only if optional AI escalation is configured and needed. Self-hosted mode keeps logs inside your network.
+
+### Does Badgr auto-fix code?
+No. Badgr reports findings and suggested fixes.
+
+### Can I run it without an API key?
+Yes. Pipeline Check works without a Badgr API key.
 
 ## Support
 
-- Docs: [aibadgr.com/docs](https://aibadgr.com/docs)
+- Docs: [aibadgr.com](https://aibadgr.com)
 - Email: [hello@aibadgr.com](mailto:hello@aibadgr.com)
 
 ## License
