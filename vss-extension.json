@@ -2,7 +2,7 @@
   "manifestVersion": 1,
   "id": "badgr-ci",
   "name": "Badgr Pipeline Check",
-  "version": "1.0.4",
+  "version": "1.0.6",
   "publisher": "aibadgr",
   "public": true,
   "description": "Badgr Pipeline Check — CI Failure Diagnosis for Azure DevOps. Always-on pipeline check that diagnoses failures, reports health, and scans for security issues. No API key required.",
