@@ -30223,59 +30223,70 @@ function normalizeDiagnosis(diagnosis) {
 
 // packages/badgr-agent/dist/ci/render-report.js
 var SEVERITY_ICON = {
-  critical: "\u{1F534}",
-  high: "\u{1F7E0}",
-  medium: "\u{1F7E1}",
-  low: "\u26AA"
+  critical: "CRITICAL",
+  high: "HIGH",
+  medium: "MEDIUM",
+  low: "LOW"
 };
+function formatEvidence(line) {
+  const trimmed = line.trim().replace(/^`+|`+$/g, "");
+  return trimmed.length > 140 ? `${trimmed.slice(0, 137)}...` : trimmed;
+}
+function renderFindingBlock(index, finding) {
+  const severity = SEVERITY_ICON[finding.severity] ?? finding.severity.toUpperCase();
+  const lines = [
+    `[${index}] ${finding.title}  \xB7  ${severity}`
+  ];
+  for (const evidence of finding.evidence.slice(0, 2)) {
+    lines.push(`    ${formatEvidence(evidence)}`);
+  }
+  lines.push(`    Fix: ${finding.suggestion}`);
+  lines.push("");
+  return lines;
+}
+function countFindings(report) {
+  return (report.failureScore?.findings.length ?? 0) + (report.healthScore?.findings.length ?? 0) + report.securityScore.findings.length + (report.auditScore?.findings.length ?? 0);
+}
 function renderHealthReport(report) {
   const lines = [`${BADGR_MARKER}`, `### Badgr Pipeline Check \u2014 Pipeline Health`];
   if (report.redactionCount) {
-    lines.push(`
-> _Badgr redacted ${report.redactionCount} possible secret${report.redactionCount === 1 ? "" : "s"} before analysis._
-`);
+    lines.push("", `> Badgr redacted ${report.redactionCount} possible secret${report.redactionCount === 1 ? "" : "s"} before analysis.`, "");
   }
-  lines.push(`
-${report.summary}`);
+  lines.push(report.summary);
   if (report.pipeline_duration_seconds !== void 0) {
-    lines.push(`
-**Total duration:** ${formatDuration(report.pipeline_duration_seconds)}`);
+    lines.push("", `Total duration: ${formatDuration(report.pipeline_duration_seconds)}`);
   }
   if (report.duration_regression) {
-    lines.push(`**Duration regression:** ${report.duration_regression}`);
+    lines.push(`Duration regression: ${report.duration_regression}`);
   }
   if (report.queue_time_seconds !== void 0) {
-    lines.push(`**Queue time:** ${formatDuration(report.queue_time_seconds)}`);
+    lines.push(`Queue time: ${formatDuration(report.queue_time_seconds)}`);
   }
   if (report.wasted_time_seconds !== void 0) {
-    lines.push(`**Wasted time:** ${formatDuration(report.wasted_time_seconds)}`);
+    lines.push(`Wasted time: ${formatDuration(report.wasted_time_seconds)}`);
   }
   if (report.slowest_steps.length > 0) {
-    lines.push(`
-**Slowest steps:**`);
+    lines.push("", "Slowest steps:");
     for (const step of report.slowest_steps.slice(0, 5)) {
-      lines.push(`- ${step.name}: ${formatDuration(step.duration_seconds)}`);
+      lines.push(`  - ${step.name}: ${formatDuration(step.duration_seconds)}`);
     }
   }
   if (report.cache_misses.length > 0) {
-    lines.push(`
-**Cache misses:** ${report.cache_misses.join(", ")}`);
+    lines.push(`Cache misses: ${report.cache_misses.join(", ")}`);
   }
   if (report.retry_count > 0) {
-    lines.push(`**Retries:** ${report.retry_count}`);
+    lines.push(`Retries: ${report.retry_count}`);
   }
   if (report.flaky_tests.length > 0) {
-    lines.push(`
-**Flaky tests detected:**`);
+    lines.push("", "Flaky tests detected:");
     for (const test of report.flaky_tests.slice(0, 5)) {
-      lines.push(`- ${test}`);
+      lines.push(`  - ${test}`);
     }
   }
   if (report.suggestions.length > 0) {
-    lines.push(`
-**Suggestions:**`);
+    lines.push("", "Suggestions:");
     for (const s of report.suggestions) {
-      lines.push(`- ${s}`);
+      lines.push(`  - ${s}`);
     }
   }
   return lines.join("\n");
@@ -30284,20 +30295,23 @@ function renderAuditReport(report) {
   const lines = [
     `${BADGR_MARKER}`,
     `### Badgr Pipeline Check \u2014 Pipeline Audit`,
-    ``,
+    "",
     report.summary,
-    ``,
-    `**Findings:** ${report.total_findings} (${report.high_count} high, ${report.medium_count} medium, ${report.low_count} low)`
+    "",
+    `Findings: ${report.total_findings} (${report.high_count} high, ${report.medium_count} medium, ${report.low_count} low)`
   ];
   if (report.findings.length > 0) {
-    lines.push(``);
-    for (const finding of report.findings) {
-      const icon = SEVERITY_ICON[finding.severity] ?? "\u26AA";
-      const fileNote = finding.file ? ` in \`${finding.file}\`` : "";
-      lines.push(`**${icon} [${finding.severity.toUpperCase()}]** ${finding.description}${fileNote}`);
-      lines.push(`  \u2192 ${finding.suggestion}`);
-      lines.push(``);
-    }
+    lines.push("");
+    report.findings.forEach((finding, i5) => {
+      lines.push(...renderFindingBlock(i5 + 1, {
+        area: "audit",
+        severity: finding.severity,
+        title: finding.description,
+        evidence: finding.file ? [finding.file] : [],
+        suggestion: finding.suggestion,
+        confidence: finding.severity === "high" ? "high" : "medium"
+      }));
+    });
   }
   return lines.join("\n");
 }
@@ -30307,81 +30321,142 @@ function renderSecurityReport(report) {
     `### Badgr Pipeline Check \u2014 Security Scan`
   ];
   if (report.redaction_count > 0) {
-    lines.push(`
-> _Badgr redacted ${report.redaction_count} possible secret${report.redaction_count === 1 ? "" : "s"} before scanning._
-`);
+    lines.push("", `> Badgr redacted ${report.redaction_count} possible secret${report.redaction_count === 1 ? "" : "s"} before scanning.`, "");
   }
-  lines.push(``, report.summary, ``);
-  lines.push(`**Findings:** ${report.total_findings}`);
+  lines.push(report.summary, "", `Findings: ${report.total_findings}`);
   if (report.findings.length > 0) {
-    lines.push(``);
-    for (const finding of report.findings) {
-      const icon = SEVERITY_ICON[finding.severity] ?? "\u26AA";
-      lines.push(`**${icon} [${finding.severity.toUpperCase()}]** ${finding.description}`);
-      lines.push(`  \u2192 ${finding.recommendation}`);
-      lines.push(``);
-    }
+    lines.push("");
+    report.findings.forEach((finding, i5) => {
+      lines.push(...renderFindingBlock(i5 + 1, {
+        area: "security",
+        severity: finding.severity,
+        title: finding.description,
+        evidence: [],
+        suggestion: finding.recommendation,
+        confidence: finding.severity === "high" ? "high" : "medium"
+      }));
+    });
   }
   return lines.join("\n");
 }
-var AREA_LABEL = {
-  failure: "Failure",
-  health: "Health",
-  audit: "Config Audit",
-  security: "Security"
-};
-function renderLocalScore(score, includeAiNote = false) {
-  const lines = [];
-  if (score.findings.length === 0) {
-    lines.push(`No ${AREA_LABEL[score.area]?.toLowerCase() ?? score.area} issues found.`);
-    return lines;
-  }
-  for (const f5 of score.findings) {
-    const icon = SEVERITY_ICON[f5.severity] ?? "\u26AA";
-    lines.push(`**${icon} ${f5.title}** (${f5.confidence} confidence)`);
-    for (const e5 of f5.evidence.slice(0, 3))
-      lines.push(`  \`${e5.slice(0, 200)}\``);
-    lines.push(`  \u2192 ${f5.suggestion}`);
-    if (f5.needsAi && includeAiNote)
-      lines.push(`  _(AI could refine this \u2014 add BADGR\\_API\\_KEY for deeper diagnosis)_`);
-  }
-  return lines;
-}
 function renderAutoReport(report) {
-  const lines = [BADGR_MARKER, `### Badgr Pipeline Check`];
-  const status = report.hasFailed ? "**Build:** FAILED" : "**Build:** Passed";
-  lines.push(``, status);
+  const lines = [BADGR_MARKER, "### Badgr Pipeline Check", ""];
+  lines.push(report.hasFailed ? "Build status: FAILED" : "Build status: PASSED");
+  lines.push("Analysis: rules-based");
+  lines.push("Output: console + build summary");
+  const totalFindings = countFindings(report);
   if (report.redactionCount > 0) {
-    lines.push(``, `> _Badgr redacted ${report.redactionCount} possible secret${report.redactionCount === 1 ? "" : "s"} before analysis._`);
+    lines.push(`Secrets redacted before analysis: ${report.redactionCount}`);
   }
-  if (report.hasFailed && report.failureScore) {
-    lines.push(``, `#### Failure Analysis`);
-    if (report.aiDiagnosis) {
-      lines.push(`**${report.aiDiagnosis.likelyCause}** (AI-assisted)`);
-      for (const e5 of report.aiDiagnosis.evidence.slice(0, 3))
-        lines.push(`  \`${e5.slice(0, 200)}\``);
-      lines.push(`  \u2192 ${report.aiDiagnosis.suggestedFix}`);
-      lines.push(`  **Confidence:** ${report.aiDiagnosis.confidence}`);
-      if (report.failureScore.findings.length > 0 && report.failureScore.findings[0].title !== "Unknown failure \u2014 no pattern matched") {
-        lines.push(``, `_Rules also matched: ${report.failureScore.findings.map((f5) => f5.title).join(", ")}_`);
+  if (totalFindings > 0) {
+    lines.push(`Findings: ${totalFindings} total`);
+  }
+  lines.push("", "---", "");
+  let mainFinding;
+  let mainArea = "";
+  if (report.hasFailed && report.failureScore?.findings.length) {
+    mainFinding = report.failureScore.findings[0];
+    mainArea = "failure";
+  }
+  if (mainFinding) {
+    lines.push("## Main blocker", "");
+    const severity = SEVERITY_ICON[mainFinding.severity] ?? mainFinding.severity.toUpperCase();
+    lines.push(`[1] ${mainFinding.title} \xB7 ${severity}`, "");
+    lines.push("Evidence:");
+    for (const e5 of mainFinding.evidence.slice(0, 3)) {
+      lines.push(`${formatEvidence(e5)}`);
+    }
+    lines.push("");
+    lines.push("Recommended fix:");
+    lines.push(`${mainFinding.suggestion}`, "");
+    lines.push("---", "");
+  }
+  if (report.hasFailed && report.failureScore?.findings.length && report.failureScore.findings.length > 1) {
+    lines.push("## Other failure signals", "");
+    const others = report.failureScore.findings.slice(1, 6);
+    others.forEach((finding, idx) => {
+      const severity = SEVERITY_ICON[finding.severity] ?? finding.severity.toUpperCase();
+      lines.push(`[${idx + 2}] ${finding.title} \xB7 ${severity}`, "");
+      lines.push("Evidence:");
+      for (const e5 of finding.evidence.slice(0, 2)) {
+        lines.push(`${formatEvidence(e5)}`);
       }
-    } else {
-      lines.push(...renderLocalScore(report.failureScore, true));
+      lines.push("");
+      lines.push("Recommended fix:");
+      lines.push(`${finding.suggestion}`, "");
+      lines.push("---", "");
+    });
+  }
+  if (report.healthScore?.findings.length) {
+    lines.push("## Pipeline health", "");
+    for (const finding of report.healthScore.findings.slice(0, 5)) {
+      const severity = SEVERITY_ICON[finding.severity] ?? finding.severity.toUpperCase();
+      lines.push(`[1] ${finding.title} \xB7 ${severity}`, "");
+      lines.push("Step:");
+      for (const e5 of finding.evidence.slice(0, 1)) {
+        lines.push(`${formatEvidence(e5)}`);
+      }
+      lines.push("");
+      lines.push("Recommended fix:");
+      lines.push(`${finding.suggestion}`, "");
+      lines.push("---", "");
     }
   }
-  if (report.healthScore) {
-    lines.push(``, `#### Pipeline Health`);
-    lines.push(...renderLocalScore(report.healthScore));
+  if (report.securityScore.findings.length) {
+    lines.push("## Security", "");
+    for (const finding of report.securityScore.findings.slice(0, 5)) {
+      const severity = SEVERITY_ICON[finding.severity] ?? finding.severity.toUpperCase();
+      lines.push(`[1] ${finding.title} \xB7 ${severity}`, "");
+      if (finding.evidence.length) {
+        lines.push("Evidence:");
+        for (const e5 of finding.evidence.slice(0, 2)) {
+          lines.push(`${formatEvidence(e5)}`);
+        }
+        lines.push("");
+      }
+      lines.push("Recommended fix:");
+      lines.push(`${finding.suggestion}`, "");
+      lines.push("---", "");
+    }
   }
-  lines.push(``, `#### Security`);
-  lines.push(...renderLocalScore(report.securityScore));
-  if (report.auditScore) {
-    lines.push(``, `#### Config Audit`);
-    lines.push(...renderLocalScore(report.auditScore));
+  if (report.auditScore?.findings.length) {
+    lines.push("## Config audit", "");
+    for (const finding of report.auditScore.findings.slice(0, 5)) {
+      const severity = SEVERITY_ICON[finding.severity] ?? finding.severity.toUpperCase();
+      lines.push(`[1] ${finding.title} \xB7 ${severity}`, "");
+      lines.push("Recommended fix:");
+      lines.push(`${finding.suggestion}`, "");
+      lines.push("---", "");
+    }
   }
-  const hasAnyFindings = (report.failureScore?.findings.length ?? 0) + (report.healthScore?.findings.length ?? 0) + report.securityScore.findings.length + (report.auditScore?.findings.length ?? 0);
-  const footer = report.aiDiagnosis ? `_Badgr rules engine + AI analysis_` : hasAnyFindings > 0 ? `_Badgr rules engine \xB7 [Add BADGR\\_API\\_KEY for AI-powered analysis of unknown errors](https://aibadgr.com)_` : `_Badgr rules engine \xB7 No issues detected_`;
-  lines.push(``, `---`, footer);
+  lines.push("## Summary", "");
+  if (mainFinding) {
+    lines.push(`Most likely blocker:`);
+    lines.push(`${mainFinding.title} \u2014 ${mainFinding.evidence[0] ?? "See details above"}`);
+    lines.push("");
+    lines.push("Next best action:");
+    lines.push(`${mainFinding.suggestion}`, "");
+  }
+  const otherIssues = [];
+  if (report.failureScore?.findings.slice(1).length) {
+    report.failureScore.findings.slice(1, 4).forEach((f5) => otherIssues.push(f5.title.toLowerCase()));
+  }
+  if (report.healthScore?.findings.length) {
+    report.healthScore.findings.slice(0, 2).forEach((f5) => otherIssues.push(f5.title.toLowerCase()));
+  }
+  if (report.securityScore.findings.length) {
+    report.securityScore.findings.slice(0, 2).forEach((f5) => otherIssues.push(f5.title.toLowerCase()));
+  }
+  if (report.auditScore?.findings.length) {
+    report.auditScore.findings.slice(0, 1).forEach((f5) => otherIssues.push(f5.title.toLowerCase()));
+  }
+  if (otherIssues.length) {
+    lines.push("Supporting issues found:");
+    otherIssues.forEach((issue) => lines.push(`- ${issue}`));
+    lines.push("");
+  }
+  lines.push("Badgr rules engine completed locally.");
+  lines.push("Add BADGR_API_KEY only for unknown or low-confidence failures.", "");
   return lines.join("\n");
 }
 function formatDuration(seconds) {
@@ -30696,11 +30771,21 @@ var AUDIT_RULES = [
     score: W.SECRET_PATTERN + W.SECURITY_RISK
   }
 ];
+function isBenignAuditLine(line) {
+  const t = line.trim();
+  if (/BADGR_(AUDIT|STRESS)_FIXTURE/i.test(t))
+    return true;
+  if (/SYSTEM_ACCESSTOKEN\s*:\s*\$\(/i.test(t))
+    return true;
+  if (/echo\s+["'].*(api[_-]?key|token|secret)/i.test(t))
+    return true;
+  return false;
+}
 function scoreAudit(yamlContent) {
   const lines = yamlContent.split(/\r?\n/);
   const findings = [];
   for (const rule of AUDIT_RULES) {
-    const matched = lines.filter((l3) => rule.pattern.test(l3)).slice(0, 3);
+    const matched = lines.filter((l3) => !isBenignAuditLine(l3) && rule.pattern.test(l3)).slice(0, 3);
     if (matched.length === 0)
       continue;
     const band = scoreToSeverity(rule.score);
