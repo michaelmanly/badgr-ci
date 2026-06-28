@@ -30040,7 +30040,7 @@ function collectContext(input) {
 
 // packages/badgr-agent/dist/ci/output-mode.js
 function getOutputMode() {
-  const raw = (process.env.BADGR_OUTPUT_MODE ?? "summary").toLowerCase().trim();
+  const raw = (process.env.BADGR_OUTPUT_MODE || process.env.INPUT_OUTPUT_MODE || "summary").toLowerCase().trim();
   if (raw === "summary" || raw === "pr-comment" || raw === "console" || raw === "both")
     return raw;
   console.warn(`[Badgr] Unknown BADGR_OUTPUT_MODE value "${process.env.BADGR_OUTPUT_MODE}" \u2014 defaulting to "summary". Valid values: summary, pr-comment, console, both`);
@@ -30455,8 +30455,26 @@ function renderAutoReport(report) {
     otherIssues.forEach((issue) => lines.push(`- ${issue}`));
     lines.push("");
   }
-  lines.push("Badgr rules engine completed locally.");
-  lines.push("Add BADGR_API_KEY only for unknown or low-confidence failures.", "");
+  if (report.aiDiagnosis) {
+    const d5 = report.aiDiagnosis;
+    lines.push("## AI Diagnosis", "");
+    lines.push(`**${d5.title}**`);
+    lines.push(`Confidence: ${d5.confidence}`, "");
+    lines.push(`**Likely cause:** ${d5.likelyCause}`, "");
+    if (d5.evidence.length) {
+      lines.push("Evidence:");
+      d5.evidence.slice(0, 3).forEach((e5) => lines.push(`- ${e5}`));
+      lines.push("");
+    }
+    lines.push(`**Suggested fix:** ${d5.suggestedFix}`, "");
+    lines.push("---", "");
+    lines.push('To open a PR with proposed fix instructions, add `BADGR_OPEN_PR: "true"` to your workflow env. Badgr never auto-merges.', "");
+  } else if (report.hasFailed && report.failureScore?.needsAi) {
+    lines.push("Badgr rules engine completed locally.");
+    lines.push("Add BADGR_API_KEY to enable AI diagnosis for this failure.", "");
+  } else {
+    lines.push("Badgr rules engine completed locally.", "");
+  }
   return lines.join("\n");
 }
 function formatDuration(seconds) {

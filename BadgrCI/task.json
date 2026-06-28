@@ -2,12 +2,22 @@
   "id": "8af930db-8b8a-43c5-a8f5-8f197846c001",
   "name": "BadgrCI",
   "friendlyName": "Badgr Pipeline Check",
-  "description": "Badgr Pipeline Check — always-on CI quality gate. Diagnoses failures, checks pipeline health, and scans for secrets. No API key required for rule-based analysis.",
+  "description": "Always-on Azure Pipelines check that diagnoses failed builds, reports pipeline health, scans for security risks, and suggests fixes. Runs locally by default. No API key required.",
   "helpMarkDown": "Add as the last step with condition: always(). Set BADGR_API_KEY for AI-powered diagnosis of unknown failures. Set SYSTEM_ACCESSTOKEN for richer logs and PR thread comments.",
   "category": "Utility",
   "visibility": ["Build", "Release"],
   "runsOn": ["Agent"],
   "version": { "Major": 1, "Minor": 0, "Patch": 4 },
-  "instanceNameFormat": "Badgr Agent CI",
+  "instanceNameFormat": "Badgr Pipeline Check",
+  "inputs": [
+    {
+      "name": "ci_token",
+      "type": "string",
+      "label": "CI Token",
+      "defaultValue": "",
+      "required": false,
+      "helpMarkDown": "Azure platform token for richer log access and PR comments. Badgr also auto-detects System.AccessToken when Azure exposes it — this input is optional."
+    }
+  ],
   "execution": { "Node20_1": { "target": "../dist/ci/azure/main.js" } }
 }

@@ -1,5 +1,6 @@
 stages:
   - test
+  - .post
 
 test:
   stage: test
@@ -8,16 +9,21 @@ test:
     - npm ci
     - npm test
 
-# Badgr GitLab CI Failure Check — diagnoses failures, health, security, and config.
-# Download dist/gitlab.js from: https://github.com/michaelmanly/badgr-ci/releases/latest
-badgr-pipeline-check:
+badgr_pipeline_check:
   stage: .post
   image: node:20
   when: always
-  before_script:
-    - curl -fsSL https://github.com/michaelmanly/badgr-ci/releases/latest/download/gitlab.js -o /tmp/badgr-gitlab.js
   script:
-    - node /tmp/badgr-gitlab.js
+    - npx badgr-agent pipeline-check
   variables:
-    BADGR_API_KEY: $BADGR_API_KEY     # remove to use rule-based checks only
-    GITLAB_TOKEN: $GITLAB_TOKEN       # optional: richer MR comments
+    # Optional: AI diagnosis for ambiguous failures
+    # BADGR_API_KEY: $BADGR_API_KEY
+
+    # Optional: override auto-detected GitLab token for richer logs / MR comments
+    # BADGR_CI_TOKEN: $CI_JOB_TOKEN
+
+    # Optional: output override: summary | console | pr-comment | both
+    # BADGR_OUTPUT_MODE: pr-comment
+
+    # Optional: self-hosted/private endpoint
+    # BADGR_API_URL: https://badgr.your-company.internal/v1

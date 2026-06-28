@@ -5,7 +5,7 @@
   "version": "1.0.6",
   "publisher": "aibadgr",
   "public": true,
-  "description": "Badgr Pipeline Check — CI Failure Diagnosis for Azure DevOps. Always-on pipeline check that diagnoses failures, reports health, and scans for security issues. No API key required.",
+  "description": "Always-on Azure Pipelines check that diagnoses failed builds, reports pipeline health, scans for security risks, and suggests fixes. Runs locally by default. No API key required.",
   "categories": ["Azure Pipelines"],
   "tags": ["ci", "diagnosis", "pipeline", "devops", "badgr", "ai", "failure", "build-failure", "pipeline-failure", "azure-pipelines"],
   "targets": [{ "id": "Microsoft.VisualStudio.Services" }],
@@ -16,7 +16,7 @@
   "links": {
     "getstarted": { "uri": "https://aibadgr.com" },
     "learn": { "uri": "https://github.com/michaelmanly/badgr-ci" },
-    "support": { "uri": "mailto:hello@aibadgr.com" }
+    "support": { "uri": "mailto:support@aibadgr.com" }
   },
   "repository": {
     "type": "git",

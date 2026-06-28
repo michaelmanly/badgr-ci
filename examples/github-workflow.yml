@@ -1,6 +1,8 @@
 name: CI
 
 on:
+  push:
+    branches: [main]
   pull_request:
 
 permissions:
@@ -19,12 +21,21 @@ jobs:
       - run: npm ci
       - run: npm test
 
-      # Badgr GitHub Actions Failure Check — diagnoses failures on every run.
-      # No BADGR_API_KEY required for rule-based diagnosis.
-      # Add BADGR_API_KEY to unlock AI analysis for unknown failures.
       - name: Badgr Pipeline Check
         uses: michaelmanly/badgr-ci@v1
         if: always()
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          badgr_api_key: ${{ secrets.BADGR_API_KEY }}
+          # Optional: AI diagnosis for ambiguous failures
+          # badgr_api_key: ${{ secrets.BADGR_API_KEY }}
+
+          # Optional: open PR with AI-proposed fix instructions
+          # badgr_open_pr: "true"
+
+          # Optional: override auto-detected GitHub token for richer logs / PR comments
+          # ci_token: ${{ secrets.BADGR_CI_TOKEN }}
+
+          # Optional: output override: summary | console | pr-comment | both
+          # output_mode: pr-comment
+
+          # Optional: self-hosted/private endpoint
+          # badgr_api_url: https://badgr.your-company.internal/v1

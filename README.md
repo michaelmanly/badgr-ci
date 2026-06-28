@@ -1,39 +1,58 @@
 # Badgr Pipeline Check for GitHub Actions
 
-CI Failure Diagnosis for GitHub Actions — always-on pipeline check that diagnoses failures, checks pipeline health, and scans for security issues.
+Badgr Pipeline Check helps teams understand why GitHub Actions workflows fail.
 
-[![GitHub Marketplace](https://img.shields.io/badge/Marketplace-Badgr_Pipeline_Check-blue?logo=github)](https://github.com/marketplace/actions/badgr-pipeline-check)
+It runs on every workflow, checks failed jobs, slow steps, risky commands, leaked secrets, and common workflow/config issues, then writes a clear report to the GitHub Step Summary, console, or pull request comment.
+
+Local rule-based checks run by default. A Badgr API key is optional and only enables AI diagnosis for ambiguous or low-confidence failures.
+
+[![GitHub Marketplace](https://img.shields.io/badge/Marketplace-Badgr_Pipeline_Check-blue?logo=github)](https://github.com/marketplace/actions/badgr-agent-ci)
 [![Azure Marketplace](https://img.shields.io/badge/Azure_DevOps-Badgr_Pipeline_Check-blue?logo=azure-devops)](https://marketplace.visualstudio.com/items?itemName=aibadgr.badgr-ci)
 
 ---
 
 ## What Badgr checks
 
-- **Failure diagnosis:** likely cause, evidence, suggested fix, confidence
-- **Pipeline health:** slow steps, retries, bottlenecks
-- **Security:** secrets, risky commands, broad permissions
-- **Config audit:** missing timeouts, missing cache, unsafe defaults
+**Failure diagnosis**
+Detects common workflow failures including missing dependencies, test failures, Docker build errors, TypeScript errors, package conflicts, timeouts, auth failures, and deployment issues.
+
+**Pipeline health**
+Finds slow jobs, slow install/test steps, retries, and bottlenecks.
+
+**Security scan**
+Flags secret-like values, broad token permissions, unsafe shell commands, curl | bash, --privileged flags, and sudo usage.
+
+**Config audit**
+Checks workflow YAML for missing timeouts, unpinned versions, :latest images, overbroad permissions, and hardcoded values.
 
 ## Quick start
 
-```yaml
-- name: Badgr Pipeline Check
-  uses: michaelmanly/badgr-ci@v1
-  if: always()
-  with:
-    github_token: ${{ secrets.GITHUB_TOKEN }}
-```
-
-Rule-based checks run without any API key. Add `BADGR_API_KEY` to enable AI for ambiguous failures:
+No credentials needed — `github.token` is injected automatically:
 
 ```yaml
 - name: Badgr Pipeline Check
   uses: michaelmanly/badgr-ci@v1
   if: always()
   with:
-    github_token: ${{ secrets.GITHUB_TOKEN }}
-    badgr_api_key: ${{ secrets.BADGR_API_KEY }}
+    # Optional: AI diagnosis for ambiguous failures
+    # badgr_api_key: ${{ secrets.BADGR_API_KEY }}
+
+    # Optional: open PR with AI-proposed fix instructions
+    # badgr_open_pr: "true"
+
+    # Optional: override auto-detected GitHub token for richer logs / PR comments
+    # ci_token: ${{ secrets.BADGR_CI_TOKEN }}
+
+    # Optional: output override: summary | console | pr-comment | both
+    # output_mode: pr-comment
+
+    # Optional: self-hosted/private endpoint
+    # badgr_api_url: https://badgr.your-company.internal/v1
 ```
+
+Default: runs local Pipeline Check with no Badgr API key. Summary output is default. Add CI token only for richer logs/comments. Add BADGR_API_KEY only for AI on ambiguous failures.
+
+For AI fix PRs, see the **Advanced: AI fix PR** section in the [GitHub install guide](https://github.com/michaelmanly/badgr-ci/blob/main/docs/badgr-ci-github-install.md). Requires `BADGR_API_KEY` + `badgr_open_pr: "true"`. Badgr opens a PR with proposed fix instructions — not a code patch. Never auto-merges.
 
 ## How it works
 
@@ -65,13 +84,23 @@ Health, security, and audit checks are always rule-based — they never call AI.
 
 ## Permissions
 
-`GITHUB_TOKEN` is used for workflow context and optional PR comments.
+**No BADGR_API_KEY:**
+Local checks run. No AI call.
+
+**With BADGR_API_KEY:**
+AI is used only when the workflow failed and the local failure score is low-confidence or ambiguous.
+
+**GITHUB_TOKEN:**
+Used for workflow context and optional PR comments. `pull-requests: write` is only needed if using `output_mode: pr-comment` or `both`.
+
+**Self-hosted:**
+Use BADGR_API_URL to route AI escalation to your internal Badgr container instead of aibadgr.com.
 
 ```yaml
 permissions:
-  contents: read
-  actions: read
-  pull-requests: write
+  contents: read   # fetch workflow YAML
+  actions: read    # fetch job logs
+  pull-requests: write  # only needed for PR comments
 ```
 
 ## Hosted and self-hosted
@@ -87,7 +116,6 @@ Run the Badgr Pipeline Check container inside your network. Logs are sent only t
   uses: michaelmanly/badgr-ci@v1
   if: always()
   with:
-    github_token: ${{ secrets.GITHUB_TOKEN }}
     badgr_api_url: http://badgr-agent-ci.internal:8000/v1
     badgr_api_key: ${{ secrets.BADGR_INTERNAL_KEY }}
 ```
@@ -96,12 +124,12 @@ Run the Badgr Pipeline Check container inside your network. Logs are sent only t
 
 | Mode | Output |
 |---|---|
-| `summary` | Workflow step summary |
+| `summary` | Workflow step summary (default) |
 | `console` | Job log |
 | `pr-comment` | PR comment |
 | `both` | Summary plus PR comment |
 
-Set via environment variable: `BADGR_OUTPUT_MODE: pr-comment`
+Set via the `output_mode` input or `BADGR_OUTPUT_MODE` env var.
 
 ## Example output
 
@@ -150,22 +178,25 @@ Source lives in the private monorepo at `packages/badgr-agent`. This public repo
 
 ## FAQ
 
-### Does Badgr require AI?
-No. Local rule-based checks run by default.
+### Does Badgr require an API key?
+No. The default Pipeline Check runs local rule-based checks without a Badgr API key.
 
-### Does Badgr send logs to AI Badgr?
-Only if optional AI escalation is configured and needed. Self-hosted mode keeps logs inside your network.
+### When is AI used?
+AI is only used when a build failed, a Badgr API key or private provider is configured, and the local failure score is ambiguous or low-confidence.
+
+### Does Badgr send logs to AI Badgr every run?
+No. Health, security, and audit checks are local. Known failures are handled locally. Logs are only sent for optional AI escalation when needed.
 
 ### Does Badgr auto-fix code?
-No. Badgr reports findings and suggested fixes.
+No. Badgr reports findings and suggested fixes. It does not modify code, rerun pipelines, or merge PRs.
 
-### Can I run it without an API key?
-Yes. Pipeline Check works without a Badgr API key.
+### Can I keep logs inside my network?
+Yes. Use the self-hosted Badgr Pipeline Check container and set BADGR_API_URL to your internal endpoint.
 
 ## Support
 
 - Docs: [aibadgr.com](https://aibadgr.com)
-- Email: [hello@aibadgr.com](mailto:hello@aibadgr.com)
+- Email: [support@aibadgr.com](mailto:support@aibadgr.com)
 
 ## License
 

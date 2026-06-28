@@ -1,5 +1,5 @@
 name: Badgr Pipeline Check
-description: "CI Failure Diagnosis for GitHub Actions — always-on pipeline check that diagnoses failures, checks health, and scans for security issues. AI escalation optional."
+description: "CI Failure Diagnosis for GitHub Actions — always-on check that diagnoses failed workflows, reports pipeline health, scans for security risks, and suggests fixes. Local checks first. AI only when needed."
 branding:
   icon: activity
   color: blue
@@ -7,13 +7,23 @@ runs:
   using: node20
   main: dist/index.js
 inputs:
+  ci_token:
+    required: false
+    default: ${{ github.token }}
+    description: "CI platform token for richer log access and PR comments. Defaults to github.token. Override for enterprise or self-hosted runners."
   badgr_api_key:
     required: false
-    description: "AI Badgr API key (get at https://aibadgr.com). Optional — rule-based Pipeline Check runs without it. Add to unlock AI-powered diagnosis for unknown failures."
+    description: "Badgr API key (get at https://aibadgr.com). Optional — local rule-based Pipeline Check runs without it. Add to unlock AI-powered diagnosis for ambiguous failures."
   badgr_api_url:
     required: false
-    description: "Custom Badgr API endpoint (e.g., http://badgr-agent-ci.internal:8000/v1 for self-hosted). Defaults to https://aibadgr.com/v1."
+    description: "Custom Badgr API endpoint for self-hosted (e.g., http://your-host:8000/v1). Defaults to https://aibadgr.com/v1."
     default: "https://aibadgr.com/v1"
+  output_mode:
+    required: false
+    description: "Where to post the report: summary (default) | console | pr-comment | both."
+  badgr_open_pr:
+    required: false
+    description: "Set to 'true' to open a PR with proposed fix instructions when BADGR_API_KEY is set and AI diagnoses a failure. Requires contents: write and pull-requests: write permissions. Never auto-merges."
   github_token:
-    required: true
-    description: GitHub token with contents:read, actions:read, pull-requests:write.
+    required: false
+    description: "Deprecated. Use ci_token instead."

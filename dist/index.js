@@ -30012,6 +30012,47 @@ async function callBadgrCiDiagnose(context, options) {
   return { ...validateDiagnosis(data2), redactionCount };
 }
 
+// packages/badgr-agent/dist/ci/config.js
+var DEFAULT_BADGR_CONFIG = {
+  productName: "Badgr Pipeline Check",
+  analysisMode: "pipeline-check",
+  checks: {
+    failure: true,
+    health: true,
+    security: true,
+    audit: true
+  },
+  badgrApiKey: void 0,
+  ciToken: void 0,
+  aiEnabled: false,
+  aiEscalation: "ambiguous-failures-only",
+  outputMode: "summary",
+  redactSecrets: true,
+  reportOnly: true,
+  autoFix: false,
+  rerunPipeline: false,
+  // When true, Badgr opens a PR with the AI-suggested fix. Requires BADGR_API_KEY.
+  // Never merges automatically — always requires human review.
+  openPrWithFix: false,
+  mergePullRequest: false
+};
+function resolveBadgrConfig(env2 = process.env) {
+  const badgrApiKey = env2.BADGR_API_KEY || env2.INPUT_BADGR_API_KEY || void 0;
+  const ciToken = env2.BADGR_CI_TOKEN || env2.INPUT_CI_TOKEN || env2.GITHUB_TOKEN || env2.INPUT_GITHUB_TOKEN || env2.SYSTEM_ACCESSTOKEN || env2.CI_JOB_TOKEN || void 0;
+  const outputMode = env2.BADGR_OUTPUT_MODE || env2.INPUT_OUTPUT_MODE || DEFAULT_BADGR_CONFIG.outputMode;
+  const openPrWithFix = (env2.BADGR_OPEN_PR || env2.INPUT_BADGR_OPEN_PR || "").toLowerCase() === "true";
+  const apiUrl = env2.BADGR_API_URL || env2.INPUT_BADGR_API_URL || DEFAULT_API_URL;
+  return {
+    ...DEFAULT_BADGR_CONFIG,
+    badgrApiKey,
+    ciToken,
+    outputMode,
+    aiEnabled: Boolean(badgrApiKey),
+    openPrWithFix,
+    apiUrl
+  };
+}
+
 // packages/badgr-agent/dist/ci/extract-logs.js
 function stripAnsi(input) {
   return input.replace(/\u001b\[[0-9;]*m/g, "");
@@ -30039,7 +30080,7 @@ function collectContext(input) {
 
 // packages/badgr-agent/dist/ci/output-mode.js
 function getOutputMode() {
-  const raw = (process.env.BADGR_OUTPUT_MODE ?? "summary").toLowerCase().trim();
+  const raw = (process.env.BADGR_OUTPUT_MODE || process.env.INPUT_OUTPUT_MODE || "summary").toLowerCase().trim();
   if (raw === "summary" || raw === "pr-comment" || raw === "console" || raw === "both")
     return raw;
   console.warn(`[Badgr] Unknown BADGR_OUTPUT_MODE value "${process.env.BADGR_OUTPUT_MODE}" \u2014 defaulting to "summary". Valid values: summary, pr-comment, console, both`);
@@ -30466,8 +30507,26 @@ function renderAutoReport(report) {
     otherIssues.forEach((issue) => lines.push(`- ${issue}`));
     lines.push("");
   }
-  lines.push("Badgr rules engine completed locally.");
-  lines.push("Add BADGR_API_KEY only for unknown or low-confidence failures.", "");
+  if (report.aiDiagnosis) {
+    const d5 = report.aiDiagnosis;
+    lines.push("## AI Diagnosis", "");
+    lines.push(`**${d5.title}**`);
+    lines.push(`Confidence: ${d5.confidence}`, "");
+    lines.push(`**Likely cause:** ${d5.likelyCause}`, "");
+    if (d5.evidence.length) {
+      lines.push("Evidence:");
+      d5.evidence.slice(0, 3).forEach((e5) => lines.push(`- ${e5}`));
+      lines.push("");
+    }
+    lines.push(`**Suggested fix:** ${d5.suggestedFix}`, "");
+    lines.push("---", "");
+    lines.push('To open a PR with proposed fix instructions, add `BADGR_OPEN_PR: "true"` to your workflow env. Badgr never auto-merges.', "");
+  } else if (report.hasFailed && report.failureScore?.needsAi) {
+    lines.push("Badgr rules engine completed locally.");
+    lines.push("Add BADGR_API_KEY to enable AI diagnosis for this failure.", "");
+  } else {
+    lines.push("Badgr rules engine completed locally.", "");
+  }
   return lines.join("\n");
 }
 function formatDuration(seconds) {
@@ -31028,6 +31087,76 @@ async function fetchAllJobsLog(token, repo, runId) {
   }
   return parts.join("\n");
 }
+async function openFixPr(token, repo, runId, baseBranch, diagnosis) {
+  try {
+    const fixBranch = `badgr/fix-run-${runId}`;
+    const refResp = await gh(`/repos/${repo}/git/ref/heads/${baseBranch}`, token);
+    const sha = refResp.object?.sha;
+    if (!sha)
+      return void 0;
+    await gh(`/repos/${repo}/git/refs`, token, {
+      method: "POST",
+      body: JSON.stringify({ ref: `refs/heads/${fixBranch}`, sha })
+    });
+    const fixDoc = [
+      `# Badgr AI Fix Suggestion \u2014 Run ${runId}`,
+      ``,
+      `**Confidence:** ${diagnosis.confidence}`,
+      ``,
+      `## Likely Cause`,
+      diagnosis.likelyCause,
+      ``,
+      `## Suggested Fix`,
+      diagnosis.suggestedFix,
+      ``,
+      `## Evidence`,
+      ...diagnosis.evidence.map((e5) => `- ${e5}`)
+    ].join("\n");
+    const content = Buffer.from(fixDoc, "utf8").toString("base64");
+    await gh(`/repos/${repo}/contents/.badgr/suggested-fix.md`, token, {
+      method: "PUT",
+      body: JSON.stringify({
+        message: `fix: Badgr AI suggestion for run ${runId}
+
+${diagnosis.title}`,
+        content,
+        branch: fixBranch
+      })
+    });
+    const prBody = [
+      `## ${diagnosis.title}`,
+      ``,
+      `This PR was opened automatically by [Badgr Pipeline Check](https://github.com/marketplace/actions/badgr-agent-ci) after diagnosing a CI failure on run [${runId}](${process.env.GITHUB_SERVER_URL}/${repo}/actions/runs/${runId}).`,
+      ``,
+      `**Confidence:** ${diagnosis.confidence}`,
+      ``,
+      `## Likely Cause`,
+      diagnosis.likelyCause,
+      ``,
+      `## Suggested Fix`,
+      diagnosis.suggestedFix,
+      ``,
+      `## Evidence`,
+      ...diagnosis.evidence.map((e5) => `- \`${e5}\``),
+      ``,
+      `---`,
+      `> \u26A0\uFE0F AI-generated suggestion. Review carefully before merging. Badgr never auto-merges.`,
+      `> To disable, remove \`BADGR_OPEN_PR: "true"\` from your workflow env.`
+    ].join("\n");
+    const prResp = await gh(`/repos/${repo}/pulls`, token, {
+      method: "POST",
+      body: JSON.stringify({
+        title: `fix: ${diagnosis.title} (Badgr AI suggestion)`,
+        head: fixBranch,
+        base: baseBranch,
+        body: prBody
+      })
+    });
+    return prResp.html_url;
+  } catch {
+    return void 0;
+  }
+}
 async function fetchWorkflowYaml(token, repo) {
   const workflowPath = process.env.GITHUB_WORKFLOW_REF;
   if (!workflowPath)
@@ -31059,8 +31188,7 @@ function buildGitHubContext(repo, runId, runUrl, log, extra = {}) {
   });
 }
 async function run() {
-  const apiKey = process.env.BADGR_API_KEY || process.env.INPUT_BADGR_API_KEY;
-  const token = process.env.GITHUB_TOKEN || process.env.INPUT_GITHUB_TOKEN;
+  const { badgrApiKey: apiKey, ciToken: token, openPrWithFix, apiUrl } = resolveBadgrConfig(process.env);
   const repo = process.env.GITHUB_REPOSITORY;
   const runId = process.env.GITHUB_RUN_ID;
   const outputMode = getOutputMode();
@@ -31068,13 +31196,10 @@ async function run() {
   if (badgrMode !== "auto" && !apiKey)
     throw new Error("BADGR_API_KEY or badgr_api_key input is required when BADGR_MODE is set to failure, health, audit, or security. Remove BADGR_MODE to use the default Pipeline Check, which runs without an API key.");
   if (!token)
-    throw new Error("GITHUB_TOKEN or github_token input is required. Grant contents: read, actions: read" + (shouldPostPrComment(outputMode) ? ", pull-requests: write" : "") + ".");
+    throw new Error("No CI token found. When using michaelmanly/badgr-ci@v1, github.token is set automatically. If running outside GitHub Actions, set BADGR_CI_TOKEN in your environment.");
   if (!repo || !runId)
     throw new Error("GITHUB_REPOSITORY and GITHUB_RUN_ID are required in GitHub Actions.");
-  const apiOptions = apiKey ? {
-    apiUrl: process.env.BADGR_API_URL || process.env.INPUT_BADGR_API_URL || DEFAULT_API_URL,
-    apiKey
-  } : void 0;
+  const apiOptions = apiKey ? { apiUrl, apiKey } : void 0;
   const prNumber = await getPullRequestNumber();
   const runUrl = process.env.GITHUB_SERVER_URL ? `${process.env.GITHUB_SERVER_URL}/${repo}/actions/runs/${runId}` : void 0;
   if (badgrMode === "auto") {
@@ -31095,6 +31220,16 @@ async function run() {
       await upsertPrComment(token, repo, prNumber, markdown);
     if (!prNumber || shouldPostSummary(outputMode) || !shouldPostPrComment(outputMode))
       await publishOutput(markdown, outputMode);
+    if (openPrWithFix && autoReport.aiDiagnosis) {
+      const baseBranch = process.env.GITHUB_REF_NAME || process.env.GITHUB_BASE_REF;
+      if (baseBranch) {
+        const prUrl = await openFixPr(token, repo, runId, baseBranch, autoReport.aiDiagnosis);
+        if (prUrl)
+          console.log(`[Badgr] Fix PR opened: ${prUrl}`);
+        else
+          console.warn("[Badgr] BADGR_OPEN_PR=true but fix PR could not be created. Ensure contents: write and pull-requests: write permissions are set.");
+      }
+    }
     return;
   }
   const requiredApiOptions = apiOptions;

@@ -8,6 +8,7 @@ steps:
   - task: NodeTool@0
     inputs:
       versionSpec: '20.x'
+    displayName: Install Node.js
 
   - script: npm ci
     displayName: Install dependencies
@@ -15,31 +16,19 @@ steps:
   - script: npm test
     displayName: Run tests
 
-  # Badgr Azure Pipelines Failure Check — always run last, condition: always()
-  # Diagnoses failures, health, security, and audit using local rules.
-  # No BADGR_API_KEY or SYSTEM_ACCESSTOKEN required for rule-based analysis.
   - task: BadgrCI@1
-    condition: always()
     displayName: Badgr Pipeline Check
+    condition: always()
+    inputs:
+      # Optional: richer Azure logs / PR comments
+      # Requires "Allow scripts to access OAuth token"
+      # ci_token: $(System.AccessToken)
     env:
-      BADGR_API_KEY: $(BADGR_API_KEY)
-      BADGR_OUTPUT_MODE: summary
-      # SYSTEM_ACCESSTOKEN: $(System.AccessToken)  # optional: richer logs + PR thread comments
+      # Optional: AI diagnosis for ambiguous failures
+      # BADGR_API_KEY: $(BADGR_API_KEY)
 
-  # Enhanced — pass SYSTEM_ACCESSTOKEN for real Azure DevOps task logs.
-  # - task: BadgrCI@1
-  #   condition: always()
-  #   displayName: Badgr Pipeline Check (enhanced)
-  #   env:
-  #     BADGR_API_KEY: $(BADGR_API_KEY)
-  #     SYSTEM_ACCESSTOKEN: $(System.AccessToken)
-  #     BADGR_OUTPUT_MODE: summary
+      # Optional: output override: summary | console | pr-comment | both
+      # BADGR_OUTPUT_MODE: pr-comment
 
-  # Self-hosted — no logs sent to aibadgr.com.
-  # - task: BadgrCI@1
-  #   condition: always()
-  #   displayName: Badgr Pipeline Check (self-hosted)
-  #   env:
-  #     BADGR_API_URL: http://your-host:8000/v1
-  #     BADGR_API_KEY: $(BADGR_INTERNAL_KEY)
-  #     BADGR_OUTPUT_MODE: summary
+      # Optional: self-hosted/private endpoint
+      # BADGR_API_URL: https://badgr.your-company.internal/v1
