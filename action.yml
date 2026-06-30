@@ -1,5 +1,5 @@
 name: Badgr Pipeline Check
-description: "CI Failure Diagnosis for GitHub Actions — always-on check that diagnoses failed workflows, reports pipeline health, scans for security risks, and suggests fixes. Local checks first. AI only when needed."
+description: "Diagnose failed CI builds with likely cause, evidence, and a suggested fix. Local checks first, AI only when needed."
 branding:
   icon: activity
   color: blue
